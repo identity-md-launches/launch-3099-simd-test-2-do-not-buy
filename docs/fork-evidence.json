@@ -1,0 +1,25 @@
+{
+  "chainId": 4663,
+  "l2Block": 108268099,
+  "blockHash": "0x8d0a9028f15930a70af6a07c9498faeabfa570608553ec24ff9c2efe83b8df42",
+  "l1Block": 26361756,
+  "timestamp": 1794039801,
+  "rpc": "https://robinhood.rpc.pinax.network",
+  "contracts": {
+    "IMD": {
+      "address": "0x5F7Bb59365ce557C26dbcAa4EE9d39A4b95B7127",
+      "codeBytes": 15448,
+      "codeHash": "0xa9a0e893f7d8327fe96f823291ad9199af5456c2f9fd80bbdeff29d1e91a93e2"
+    },
+    "PoolManager": {
+      "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+      "codeBytes": 24009,
+      "codeHash": "0xbd3881180b547f5fe817545743cfb4343e96b1bc6640dcd70c106b0066e95626"
+    },
+    "Vault": {
+      "address": "0xa9d495A0b10EE4A2a735c2E0f6D38C583194813A",
+      "codeBytes": 5736,
+      "codeHash": "0xe1bd236cd33598464b2a628a72a317bfaff6f172dea15fd4a161e4493dbd4c24"
+    }
+  }
+}
