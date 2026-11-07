@@ -3,6 +3,7 @@ pragma solidity 0.8.26;
 
 import {HookFixture} from "./helpers/HookFixture.sol";
 import {PoolActor} from "./helpers/PoolActor.sol";
+import {SyncFirstRouter} from "./TestHook.t.sol";
 import {TestHook} from "../src/TestHook.sol";
 import {PoolManager} from "v4-core/src/PoolManager.sol";
 import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
@@ -222,6 +223,43 @@ abstract contract RobinhoodForkBehavior is HookFixture {
         assertEq(imd.balanceOf(keeper), 0, "keeper gets nothing");
         assertEq(hook.pendingFees(), 0);
         assertEq(hook.flushFees(), 0, "second flush is a no-op");
+    }
+
+    /// @dev A router that calls sync(input) before swap and settles afterwards is legal v4 ordering. On a
+    /// buy, IMD is the synced currency during afterSwap, so moving real IMD out would under-credit the
+    /// router's settle; the hook must keep the fee as an IMD claim instead and the swap must succeed.
+    /// On a sell the synced currency is SIMDTEST2, so the fee goes straight to the vault in IMD.
+    function testFork_syncFirstRouterOnRealManagerStillPaysVaultInIMD() public {
+        SyncFirstRouter router = new SyncFirstRouter(manager);
+        deal(IMD, address(router), 1000 ether);
+        token.transfer(address(router), 1000 ether);
+        uint160 lo = TickMath.MIN_SQRT_PRICE + 1;
+        uint160 hi = TickMath.MAX_SQRT_PRICE - 1;
+        uint256 vaultBefore = imd.balanceOf(VAULT);
+        uint256 managerImd = imd.balanceOf(address(manager));
+
+        BalanceDelta d = router.swap(key, SwapParams(imdIs0, -100 ether, imdIs0 ? lo : hi));
+        assertEq(imdIs0 ? d.amount0() : d.amount1(), -100 ether, "buyer spends exactly the budget");
+        assertEq(imd.balanceOf(address(router)), 900 ether);
+        assertEq(hook.pendingFees(), 0.75 ether, "fee kept as an IMD claim while IMD is synced");
+        assertEq(imd.balanceOf(VAULT), vaultBefore, "no IMD moved out mid-settlement");
+        assertEq(imd.balanceOf(address(manager)), managerImd + 100 ether, "manager holds the full budget");
+
+        d = router.swap(key, SwapParams(!imdIs0, -100 ether, imdIs0 ? hi : lo));
+        uint256 received = uint256(uint128(imdIs0 ? d.amount0() : d.amount1()));
+        uint256 sellFee = imd.balanceOf(VAULT) - vaultBefore;
+        assertGt(sellFee, 0);
+        assertEq(sellFee, received * 75 / 9925, "sell fee paid directly, 0.75% of gross IMD");
+        assertEq(imd.balanceOf(address(router)), 900 ether + received);
+        assertEq(hook.pendingFees(), 0.75 ether, "sell did not touch the buy's claim");
+
+        address keeper = makeAddr("fork keeper");
+        vm.prank(keeper);
+        assertEq(hook.flushFees(), 0.75 ether);
+        assertEq(imd.balanceOf(VAULT) - vaultBefore, sellFee + 0.75 ether, "claim redeemed to the vault only");
+        assertEq(imd.balanceOf(keeper), 0);
+        assertEq(hook.pendingFees(), 0);
+        assertEq(imd.balanceOf(address(hook)), 0);
     }
 
     // ------------------------------------------------------------------
