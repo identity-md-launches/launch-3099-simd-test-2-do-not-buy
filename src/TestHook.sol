@@ -6,6 +6,7 @@ import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
 import {IUnlockCallback} from "v4-core/src/interfaces/callback/IUnlockCallback.sol";
 import {Hooks} from "v4-core/src/libraries/Hooks.sol";
 import {SafeCast} from "v4-core/src/libraries/SafeCast.sol";
+import {TransientStateLibrary} from "v4-core/src/libraries/TransientStateLibrary.sol";
 import {Currency} from "v4-core/src/types/Currency.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {PoolId} from "v4-core/src/types/PoolId.sol";
@@ -158,6 +159,13 @@ contract TestHook is IUnlockCallback {
     }
 
     function _pay(uint256 fee) private {
+        // If IMD is the manager's synced currency, a payer may still settle against the reserves
+        // recorded at sync. Moving IMD out now would under-credit that settle, so keep a claim instead.
+        if (Currency.unwrap(TransientStateLibrary.getSyncedCurrency(poolManager)) == IMD) {
+            poolManager.mint(address(this), uint160(IMD), fee);
+            emit FeeDeferred(fee);
+            return;
+        }
         try poolManager.take(Currency.wrap(IMD), VAULT, fee) {
             emit FeePaid(fee);
         } catch {

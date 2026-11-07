@@ -14,6 +14,35 @@ import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {Currency} from "v4-core/src/types/Currency.sol";
 import {BalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
 import {ModifyLiquidityParams, SwapParams} from "v4-core/src/types/PoolOperation.sol";
+import {IUnlockCallback} from "v4-core/src/interfaces/callback/IUnlockCallback.sol";
+
+/// @dev Legal v4 ordering: sync the input currency BEFORE the swap, then transfer and settle.
+contract SyncFirstRouter is IUnlockCallback {
+    IPoolManager internal immutable manager;
+
+    constructor(IPoolManager manager_) {
+        manager = manager_;
+    }
+
+    function swap(PoolKey memory key, SwapParams memory params) external returns (BalanceDelta) {
+        return abi.decode(manager.unlock(abi.encode(key, params)), (BalanceDelta));
+    }
+
+    function unlockCallback(bytes calldata data) external returns (bytes memory) {
+        require(msg.sender == address(manager), "manager");
+        (PoolKey memory key, SwapParams memory params) = abi.decode(data, (PoolKey, SwapParams));
+        Currency input = params.zeroForOne ? key.currency0 : key.currency1;
+        Currency output = params.zeroForOne ? key.currency1 : key.currency0;
+        manager.sync(input);
+        BalanceDelta delta = manager.swap(key, params, "");
+        int128 paid = params.zeroForOne ? delta.amount0() : delta.amount1();
+        int128 received = params.zeroForOne ? delta.amount1() : delta.amount0();
+        input.transfer(address(manager), uint256(-int256(paid)));
+        manager.settle();
+        if (received > 0) manager.take(output, address(this), uint128(received));
+        return abi.encode(delta);
+    }
+}
 
 abstract contract HookBehavior is HookFixture {
     using StateLibrary for IPoolManager;
@@ -117,6 +146,32 @@ abstract contract HookBehavior is HookFixture {
         assertEq(imd.balanceOf(VAULT) - vaultBefore, t.fee);
         assertEq(hook.pendingFees(), 0);
         assertEq(hook.flushFees(), 0);
+    }
+
+    function test_syncFirstRouterBuysAndSellsWithFeeAccounted() public {
+        SyncFirstRouter router = new SyncFirstRouter(manager);
+        MockERC20(IMD).mint(address(router), 1000 ether);
+        token.transfer(address(router), 1000 ether);
+        uint256 before = imd.balanceOf(VAULT) + hook.pendingFees();
+
+        // Buy: IMD is synced when afterSwap runs, so the fee is kept as a claim, not taken out.
+        uint160 lo = TickMath.MIN_SQRT_PRICE + 1;
+        uint160 hi = TickMath.MAX_SQRT_PRICE - 1;
+        BalanceDelta d = router.swap(key, SwapParams(imdIs0, -100 ether, imdIs0 ? lo : hi));
+        assertEq(imdIs0 ? d.amount0() : d.amount1(), -100 ether);
+        assertEq(imd.balanceOf(VAULT) + hook.pendingFees() - before, 0.75 ether);
+        assertEq(hook.pendingFees(), 0.75 ether);
+
+        // Sell: the synced currency is the launch token, so the fee is paid straight to the vault.
+        uint256 vaultBefore = imd.balanceOf(VAULT);
+        d = router.swap(key, SwapParams(!imdIs0, -100 ether, imdIs0 ? hi : lo));
+        int128 received = imdIs0 ? d.amount0() : d.amount1();
+        uint256 sellFee = imd.balanceOf(VAULT) - vaultBefore;
+        assertEq(sellFee, uint256(uint128(received)) * 75 / 9925);
+        assertEq(hook.pendingFees(), 0.75 ether);
+
+        assertEq(hook.flushFees(), 0.75 ether);
+        assertEq(imd.balanceOf(VAULT) - vaultBefore, sellFee + 0.75 ether);
     }
 
     function test_revertingVaultTransferDoesNotBlockAnySwapMode() public {

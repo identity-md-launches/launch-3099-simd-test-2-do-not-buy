@@ -6,17 +6,18 @@ The exact requested fuzz seed is pinned in `foundry.toml`:
 
 | Check | Result |
 | --- | --- |
-| `forge build` / `forge build --sizes` | Passed; hook runtime 6,012 bytes, token runtime 1,722 bytes, both below EIP-170. |
+| `forge build` / `forge build --sizes` | Passed; hook runtime 6,324 bytes, token runtime 1,722 bytes, both below EIP-170. |
 | `forge fmt --check` | Passed after `forge fmt`. |
-| `forge test` | 57 passed, zero failures. Two fork **fixtures** are explicitly skipped with no active fork. |
+| `forge test` | 59 passed, zero failures. Two fork **fixtures** are explicitly skipped with no active fork. |
 | Local fuzzing | Nine fuzz tests, 1,000 cases each, including both currency orders, four swap modes, partial fills, initialized tick crossings and a differential core-swap comparison. |
 | Stateful invariants | Two suites, each 128 runs × 32 calls; 8,192 total actions, zero unexpected reverts. |
 | Initial Robinhood fork suite | Eight passed, zero failures, zero skips, at L2 block 108,268,099. |
+| Fork suite at live head (2026-11-07) | Scratch copy with only the pinned-header assertions removed: eight passed, zero failures, at L2 block 108,318,098 on `https://rpc.mainnet.chain.robinhood.com`, including the sync-first fee fix. |
 | Later fork reruns | General RPC: historical state unavailable. Pinax: HTTP 429, free tier rate limit exceeded. Neither rerun is counted as a pass. |
 
 The local suites cover forbidden callbacks, wrong pools, invalid constructors/flags, tiny and extreme
 amounts, empty liquidity, token-only manager reserves, reverting and false-returning transfers,
-failed/retried claim redemption, claim theft attempts, reentrancy attempts, settlement rollback,
+failed/retried claim redemption, routers that sync IMD before the swap, claim theft attempts, reentrancy attempts, settlement rollback,
 fixed fees over time/blocks, no administrative redirection, LP fee collection, liquidity withdrawal,
 fixed token supply and runtime escape-hatch checks.
 

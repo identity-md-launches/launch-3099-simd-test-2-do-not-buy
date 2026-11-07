@@ -95,7 +95,10 @@ change the pool's curve or LP accounting.
 ### Delivery failure and recovery
 
 Normal swaps transfer IMD directly from PoolManager to the fixed vault and emit `FeePaid(amount)`.
-If that transfer reverts or returns false, the hook catches the failed `take` and instead mints
+If IMD is the manager's currently synced currency when `afterSwap` runs (a router that calls
+`sync(IMD)` before `swap` and settles afterwards, a legal v4 ordering), moving IMD out would make
+that router's `settle` credit the fee short and revert its unlock. In that case the hook skips the
+transfer and mints the claim described below (`FeeDeferred`). If that transfer reverts or returns false, the hook catches the failed `take` and instead mints
 an IMD ERC-6909 claim **to itself**, emitting `FeeDeferred(amount)`. This requires no IMD balance
 and prevents fee delivery from blocking an otherwise valid swap, including a fresh manager seeded
 only with the launch token. The fee stays denominated in IMD and is not waived or redirected.
@@ -107,7 +110,7 @@ balance is a successful no-op. Redemptions process at most `2^127 - 1` minor uni
 respect v4's signed-delta bounds. No caller can select a recipient, approve claims, or take a reward.
 
 “Never reverts a real swap” means no hook policy, time gate or failed fee payout rejects a valid,
-funded v4 swap. Invalid price limits, inadequate router funds, slippage checks, insufficient gas,
+funded v4 swap, whatever order the router uses for `sync` / `swap` / `settle`. Invalid price limits, inadequate router funds, slippage checks, insufficient gas,
 nonstandard IMD transfers to the trader, and v4 numeric bounds still apply. In particular the
 exact-output request plus its specified fee must fit `int256`, and final balance deltas must fit
 `int128`. No contract can force a third-party token to transfer when that token refuses.
@@ -168,7 +171,9 @@ number and timestamp. See [`docs/VALIDATION.md`](docs/VALIDATION.md) for recorde
 An archive-capable endpoint is required for this historical block. Robinhood's general public RPC
 passed all eight fork tests initially but subsequently returned `historical state ... is not available`.
 Pinax served the same block and code-hash evidence, but its test rerun hit HTTP 429 (`Free tier rate
-limit exceeded`). That rerun is not counted as a pass. An RPC's future availability is not a
+limit exceeded`). That rerun is not counted as a pass. On 2026-11-07, after the sync-first fix, a scratch copy of
+the same suite with only the two pinned-header assertions removed passed all eight tests against
+the public RPC at its latest block, 108,318,098; the pinned block was still unavailable there. An RPC's future availability is not a
 prerequisite for the offline suite.
 
 The source review and tests are not an independent security audit. The network's independent
